@@ -1,0 +1,426 @@
+---
+title: "BESDissertation"
+author: '2293525'
+date: "2023-08-22"
+output: pdf_document
+---
+Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#working directory
+setwd("/Volumes/RFERNANDEZ/diss/Data")
+
+# Load necessary libraries
+library(tidyverse)
+library(dplyr)
+library(tidygeocoder)
+library(sf)
+library(mapview)
+library(readr)
+library(purrr)
+library(progressr)
+library(lubridate)
+library(ggplot2)
+library(geosphere)
+library(lubridate)
+library(tidyr)
+library(broom)
+library(ggplot2)
+library(stats)
+```
+
+Data Loading
+```{r Data Loading - Shooting}
+#A) Shootings Data
+# Read shootings data for different years
+shootings_21 <- read_csv("Shootings/2021.csv") %>%
+  mutate(Year = "2021")
+
+shootings_22 <- read_csv("Shootings/2022.csv") %>%
+  mutate(Year = "2022")
+
+shootings_23 <- read_csv("Shootings/2023.csv") %>%
+  mutate(Year = "2023")
+```
+
+```{r Data Loading - Patterns}
+#B) Patterns Data
+# Define a function to read and filter a CSV file
+read_and_filter_csv <- function(file_path) {
+  df <- read_csv(file_path)
+  filtered_df <- df %>%
+    select(4, 7, 8, 10:15, 17, 31:35) %>%
+    filter(top_category %in% c('Gambling Industries', 'Other Financial Investment Activities'))
+  return(filtered_df)
+}
+
+# Define the years you're interested in
+years <- c("21", "22", "23")
+
+# Initialize an empty list to store patterns data for each year
+all_patterns <- list()
+
+# Loop through each year
+for (year in years) {
+  # Get pattern files for the current year
+  pattern_files <- list.files(path = "Patterns", pattern = year, full.names = TRUE, recursive = TRUE)
+  
+  # Read and filter the CSVs for the current year
+  patterns_data <- pattern_files %>%
+    map_dfr(read_and_filter_csv)
+  
+  # Assign patterns data to the list
+  all_patterns[[year]] <- patterns_data
+}
+
+# Create named list of patterns data frames for each year
+patterns_by_year <- setNames(all_patterns, years)
+
+# Save patterns data for each year as separate CSV files
+for (year in years) {
+  file_name <- paste("patterns_data_", year, ".csv", sep = "")
+  write.csv(patterns_by_year[[year]], file = file_name, row.names = FALSE)
+}
+
+```
+
+Data Exploration - Cleaning and Visualising
+```{r Data Exploration - Cleaning and Visualising Part 1}
+#A) Shootings Data
+#1) Define a function to process shootings data
+process_shootings <- function(shootings_data, year) {
+  # Clean the address column
+  shootings_data$Address <- gsub("block of", "", shootings_data$Address)
+  shootings_data$Address <- gsub("\\sand.*", "", shootings_data$Address)
+  
+  # Create columns for longitude and latitude using geocoding
+  geocoded_data <- shootings_data %>%
+    mutate(
+      long = tidygeocoder::geocode(address = Address, method = "osm")$long,
+      lat = tidygeocoder::geocode(address = Address, method = "osm")$lat
+      )
+  
+  # Write the geocoded data to a new CSV file
+  write.csv(geocoded_data, paste0("shootings_", year, "_geocoded.csv"), row.names = FALSE)
+}
+
+# Define the years
+years <- c("21", "22", "23")
+
+# Loop through each year
+for (year in years) {
+  # Get the corresponding shootings dataset
+  shootings_data <- get(paste0("shootings_", year))
+  
+  # Process the shootings data
+  process_shootings(shootings_data, year)
+}
+
+shootings_21 <- read_csv("shootings_21_geocoded.csv")
+shootings_22 <- read_csv("shootings_22_geocoded.csv")
+shootings_23 <- read_csv("shootings_23_geocoded.csv")
+
+
+#2) Plotting Volume of Shootings
+#a) Combining shooting dataframes
+shootings_list <- list(shootings_21, shootings_22, shootings_23)
+# Combine shootings datasets
+shootings_combined <- bind_rows(shootings_list)
+
+#b) use as.Date() to convert the 'incident date' column to the date format. The %B specifies the full month name, %d specifies the day, and %Y specifies the year in four digits.
+shootings_combined$'Incident Date' <- as.Date(shootings_combined$'Incident Date', format = "%B %d, %Y")
+
+#c) The month() and year() functions from the lubridate package extract the month and year from the 'incident date', respectively.
+
+# Extract month and year from the 'incident date' column
+shootings_combined$month <- month(shootings_combined$'Incident Date')
+shootings_combined$year <- year(shootings_combined$'Incident Date')
+
+#)Group the data by month and year and calculate the counts
+# Group the data by month and year and calculate the counts
+shootings_by_month <- shootings_combined %>%
+  group_by(year, month) %>%
+  summarize(count = n())
+
+#d)Visualise with ggplot
+
+# Plot the data as a line graph
+(shootings_volume <- ggplot(shootings_by_month, aes(x = month, y = count, color = factor(year))) +
+  geom_line() +
+  labs(title = "Trend of Mass Shootings by Month", x = "Month", y = "Number of Shootings", color = "Year") +
+  scale_x_continuous(breaks = 1:12, labels = month.name) + # Use full month names on the x-axis
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)))
+
+# Save the Volume of Shootings plot
+ggsave("volume_of_shootings_plot.png", plot = shootings_volume, width = 8, height = 6)
+
+
+#3) Volume of Shootings by State (2023)
+#---
+# Group by state and count the number of shootings
+shootings_per_state <- shootings_23 %>%
+  group_by(State) %>%
+  summarize(Shootings_Count = n()) %>%
+  arrange(desc(Shootings_Count))  # Arrange in descending order of shootings count
+
+# Create a bar graph
+ggplot(shootings_per_state, aes(x = reorder(State, Shootings_Count), y = Shootings_Count)) +
+  geom_bar(stat = "identity", fill = "#E41A1C") +
+  labs(title = "Number of Shootings per State from January to July 2023",
+       x = "State", y = "Number of Shootings") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save the Volume of Shootings by State plot
+ggsave("volume_of_shootings_by_state_plot.png", plot = last_plot(), width = 10, height = 6)
+
+# Create a tibble
+shootings_per_state_tibble <- shootings_per_state %>%
+  as_tibble()
+
+# Print the tibble
+print(shootings_per_state_tibble)
+```
+
+```{r Data Exploration - Cleaning and Visualising Part 2}
+#B) Patterns Data
+years <- c("21", "22", "23")
+patterns_list <- list()
+
+for (year in years) {
+  year_data <- patterns_by_year[[year]]
+  year_data$Year <- year
+  patterns_list[[year]] <- year_data
+}
+
+patterns_combined <- bind_rows(patterns_list)
+
+#Creating summary table of POIs visited
+category_tag_summary <- patterns_combined %>%
+  select(top_category, category_tags, Year) %>%
+  filter(!is.na(category_tags)) %>%
+  group_by(top_category, category_tags, Year) %>%
+  summarize(count = n()) %>%
+  arrange(top_category, desc(count))
+
+top_5_category_tags <- category_tag_summary %>%
+  group_by(top_category, Year) %>%
+  mutate(rank = row_number()) %>%
+  filter(rank <= 5) %>%
+  select(top_category, Year, category_tags, count)
+
+print(top_5_category_tags)
+
+#Visualize results using a pivot table
+library(tidyr)
+pivot_table <- top_5_category_tags %>%
+  pivot_wider(names_from = Year, values_from = count)
+
+# Print the pivot table
+print(pivot_table)
+```
+
+Pre-Analysis Organising
+```{r Pre-Analysis Organising (1)}
+# Dropping Columns
+patterns_combined <- patterns_combined %>%
+  select(-street_address, -city, -region, -postal_code)
+
+shootings_combined <- shootings_combined %>%
+  select(-State, -'City or County', -Address, -'Subjects-Suspects Killed', 
+         -'Subjects-Suspects Injured', -'Subjects-Suspects Arrested', -Operations)
+
+ 
+# Convert 'year' column to match format in patterns_combined
+shootings_combined <- shootings_combined %>%
+  mutate(Year = case_when(
+    Year == 2021 ~ "21",
+    Year == 2022 ~ "22",
+    Year == 2023 ~ "23",
+    TRUE ~ as.character(Year)  # Keep the same value if it doesn't match any of the above conditions
+  ))
+
+# Filter out rows with missing coordinates
+filtered_shootings <- shootings_combined %>%
+  filter(!is.na(lat) & !is.na(long))
+
+
+#Unnesting Patterns
+# Preprocess visits_by_day column
+patterns_combined <- patterns_combined %>%
+  mutate(visits_by_day = gsub("[\\[\\]]", "", visits_by_day)) %>%
+  filter(!is.na(visits_by_day)) %>%
+  separate_rows(visits_by_day, sep = ",") %>%
+  mutate(visits_by_day = as.numeric(visits_by_day))
+
+# Create 'Visit_Date' column
+patterns_combined <- patterns_combined %>%
+  group_by(date_range_start) %>%
+  mutate(Visit_Date = date_range_start + days(row_number() - 1)) %>%
+  ungroup()
+
+# Unnest 'visits_by_day' Column
+patterns_combined <- patterns_combined %>%
+  unnest(visits_by_day)
+
+```
+
+
+```{r Pre-Analysis Organising (2)}
+#Step 1: Filter out any POIs that were >20km from any shooting and/or not within the time frame of a shooting
+#Step 2: Adding Proximity to Shooting (i.e. close, moderate, far)
+#where close: <5km, moderate: 5-10km, far: >10km (all within threshold of 20km)
+#Step 3: Adding number of victims (sum of injured + killed)
+#Step 4: Adding timeline of events (i.e. before, day of, or after a shooting)
+
+# Convert 'Incident Date' column to Date format
+filtered_shootings$'Incident Date' <- as.Date(filtered_shootings$'Incident Date', format = "%B %d, %Y")
+
+
+#Filter POI within radius
+# Define radius
+radius_km <- 20
+
+# Initialize an empty data frame to store filtered visits
+filtered_visits <- data.frame()
+
+# Loop through each shooting event
+for (i in 1:nrow(filtered_shootings)) {
+  shooting <- filtered_shootings[i, ]
+  
+  #Step 1
+  # Calculate distances and filter visits within the radius
+  distances <- sqrt((patterns_combined$latitude - shooting$lat)^2 +
+                    (patterns_combined$longitude - shooting$long)^2)
+  visits_within_radius <- patterns_combined[distances <= radius_km, ]
+  
+  # Filter visits within a specific time frame
+  time_frame_start <- shooting$'Incident Date' - days(5)
+  time_frame_end <- shooting$'Incident Date' + days(5)
+  visits_within_time_frame <- visits_within_radius %>%
+    filter(Visit_Date >= time_frame_start, Visit_Date <= time_frame_end)
+  
+  # Add the shooting information to each row
+  visits_within_time_frame$Incident_ID <- shooting$'Incident ID'
+  visits_within_time_frame$Incident_Date <- shooting$'Incident Date'
+  
+  # Reorder columns to have Incident_ID and Incident_Date as the first two columns
+  visits_within_time_frame <- visits_within_time_frame %>%
+    select(Incident_ID, Incident_Date, everything())
+  
+  #Step 2
+  # Calculate proximity based on distance to shooting event for each visit
+  visits_within_time_frame$Proximity <- ifelse(
+    sqrt((visits_within_time_frame$latitude - shooting$lat)^2 +
+         (visits_within_time_frame$longitude - shooting$long)^2) <= 5, 'Close',
+    ifelse(
+      sqrt((visits_within_time_frame$latitude - shooting$lat)^2 +
+           (visits_within_time_frame$longitude - shooting$long)^2) <= 10, 'Moderate', 'Far'
+    )
+  )
+  
+  #Step 3
+  # Sum Victims Killed and Victims Injured columns for the shooting event
+  victims_sum <- sum(shooting$'# Victims Killed', shooting$'# Victims Injured')
+  
+  # Add the Victims column to each row
+  visits_within_time_frame$Victims <- victims_sum
+  
+  # Step 4
+  # Convert Visit_Date to Date format for comparison
+  visits_within_time_frame$Visit_Date <- as.Date(visits_within_time_frame$Visit_Date)
+
+  # Add 'Timeline' column based on Visit_Date and Incident_Date
+  visits_within_time_frame$Timeline <- ifelse(
+    visits_within_time_frame$Visit_Date < shooting$'Incident Date', 'Before',
+    ifelse(
+      visits_within_time_frame$Visit_Date == shooting$'Incident Date', 'On Day', 'After'
+    )
+  )
+
+  # Add the filtered visits to the data frame
+  filtered_visits <- rbind(filtered_visits, visits_within_time_frame)
+}
+
+```
+
+Data Analysis
+```{r Baseline Impact of Shootings on Visits to POIs}
+# Research Question: Impact of Mass Shootings on Behaviour
+
+# Convert 'visits_by_day' to numeric
+filtered_visits <- filtered_visits %>%
+  mutate(visits_by_day = as.numeric(visits_by_day))
+
+# Convert 'top_category' and 'Timeline' to factors
+filtered_visits <- filtered_visits %>%
+  mutate(
+    top_category = factor(top_category),
+    Timeline = factor(Timeline)
+  )
+
+# Perform ANOVA for the summarized data
+anova_result <- aov(visits_by_day ~ Timeline * top_category, data = filtered_visits)
+
+# Summarize the ANOVA results
+summary(anova_result)
+
+
+#The main effect of "Timeline" is not statistically significant (p = 0.486). This suggests that there is no significant difference in the average number of visits based on the different timeline periods.
+
+#The main effect of "Top Category" is highly significant (p < 2e-16). This indicates that there are significant differences in the average number of visits between different top categories.
+
+#The interaction effect between "Timeline" and "Top Category" is also not significant (p = 0.983). This suggests that the relationship between "Timeline" and the average number of visits is consistent across different top categories.
+```
+
+```{r Predictor Variables: Proximity and No of Victims}
+#Predictor variables: Proximity and Victims
+#1) Proximity
+# Convert 'Proximity' to a factor
+filtered_visits$Proximity <- factor(filtered_visits$Proximity, levels = c("Close", "Moderate", "Far"))
+
+# Perform ANOVA for Proximity
+anova_proximity <- aov(visits_by_day ~ Timeline * top_category * Proximity, data = filtered_visits)
+
+# Summarize the ANOVA results for Proximity
+summary(anova_proximity)
+
+#The main effect of "Proximity" is highly significant (p < 2e-16). This indicates that there are significant differences in the average number of visits based on the proximity to the shooting event.
+
+
+#2) Number of Victims
+# Factorize 'Victims' column
+filtered_visits$Victims_Level <- factor(ifelse(filtered_visits$Victims < 4, "Less than 4", "4 or more"))
+
+# Perform ANOVA for Victims
+anova_victims <- aov(visits_by_day ~ Timeline * top_category * Victims_Level, data = filtered_visits)
+
+# Summarize the ANOVA results for Victims
+summary(anova_victims)
+
+
+```
+
+```{r Follow up on Significant Findings}
+# Load necessary packages if not loaded already
+library(emmeans)
+
+# Perform the pairwise comparisons for each level of 'Timeline'
+em_results <- emmeans(anova_proximity, ~ top_category * Proximity * Timeline)
+summary(em_results, infer = TRUE)
+
+# Conduct pairwise comparisons for specific combinations of factors
+pairwise_comparisons <- pairs(em_results, by = c("top_category", "Proximity"))
+# View the pairwise comparison results
+print(pairwise_comparisons)
+
+#Moderate Proximity:
+#Gambling Industries vs. Other Financial Investment Activities, Moderate Proximity (Before vs. After): The average number of visits to "Gambling Industries" in moderate proximity decreased from 13.1 (Before) to 12.5 (After), and this change is statistically significant (t.ratio = -3.2863, p < 0.0001).
+
+#Far Proximity:
+#Gambling Industries vs. Other Financial Investment Activities, Far Proximity (Before vs. After): The average number of visits to "Gambling Industries" in far proximity decreased from 13.1 (Before) to 12.7 (After), and this change is statistically significant (t.ratio = -9.213, p < 0.0001).
+
+
+```
