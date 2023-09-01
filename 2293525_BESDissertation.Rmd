@@ -424,3 +424,62 @@ print(pairwise_comparisons)
 
 
 ```
+
+Plots
+```{r mapping POI}
+# Choose a specific shooting incident (replace with the actual Incident_ID)
+selected_shooting <- filtered_shootings[filtered_shootings$'Incident ID' == 2201716, ]
+
+# Filter relevant POIs within each proximity category
+relevant_pois_close <- filtered_visits[filtered_visits$Incident_ID == selected_shooting$'Incident ID' &
+                                       filtered_visits$Proximity == "Close", ]
+relevant_pois_moderate <- filtered_visits[filtered_visits$Incident_ID == selected_shooting$'Incident ID' &
+                                          filtered_visits$Proximity == "Moderate", ]
+relevant_pois_far <- filtered_visits[filtered_visits$Incident_ID == selected_shooting$'Incident ID' &
+                                     filtered_visits$Proximity == "Far", ]
+
+# Create a scatter plot
+ggplot() +
+  geom_point(data = relevant_pois_close, aes(x = longitude, y = latitude, color = "Close"), shape = 16, size = 3) +
+  geom_point(data = relevant_pois_moderate, aes(x = longitude, y = latitude, color = "Moderate"), shape = 17, size = 3) +
+  geom_point(data = relevant_pois_far, aes(x = longitude, y = latitude, color = "Far"),shape = 18,  size = 3) +
+  geom_point(data = selected_shooting, aes(x = long, y = lat), shape = 13, size = 5, color = "black", fill = "red") +
+  labs(title = "Shooting Incident and POIs by Proximity",
+       x = "Longitude", y = "Latitude") +
+  scale_color_manual(values = c("Close" = "green", "Moderate" = "yellow", "Far" = "red")) +
+  theme_minimal() +
+  guides(color = guide_legend(title = "Proximity", 
+                              override.aes = list(shape = c(16, 17, 18))))
+
+
+# Save the plot as an image file
+ggsave("mappedPOI.png", width = 10, height = 8, units = "in")
+
+
+```
+
+```{r overall trends}
+# Create a clustered bar chart with the desired order of timeline categories
+clustered_bar_chart <- ggplot(filtered_visits, aes(x = Proximity, y = visits_by_day, fill = top_category)) +
+  geom_bar(stat = "summary", fun = "mean", position = position_dodge(width = 0.8), width = 0.7) +
+  facet_grid(. ~ factor(Timeline, levels = c("Before", "On Day", "After"))) +  # Set the order of Timeline here
+  labs(title = "Average Visits by Proximity and Timeline",
+       x = "Proximity",
+       y = "Average Visits") +
+  scale_fill_discrete(name = "POI Category") +
+  theme_minimal() +
+  theme(strip.text.x = element_text(size = 12),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10))
+
+# Display the clustered bar chart
+print(clustered_bar_chart)
+
+# Save the plot as an image file (e.g., PNG)
+ggsave("clustered_bar_chart.png", plot = clustered_bar_chart, width = 10, height = 6)
+
+
+```
